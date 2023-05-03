@@ -1,0 +1,342 @@
+classdef synth2DIRMultT3<handle
+    %%
+    % usage : calcuates coupled 2d ir spectra 
+    % s2=synth2DIRMultT2(6000,[1620,1670],[20,10],[500,500],[.005,.005],200,[.1]);s2.spectra();s2.plot([120,120]);
+    % s2=synth2DIRMultT2(6000,[1540,1630,1680],[20,10,10],[200,500,200],[.005,.005,.005],100,[.2,0,5]);s2.spectra();s2.plot([150,150]);
+    %-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    % args -
+    % interferometer_scan : interferometer scanning range in fs, e.g.
+    % 6000fs
+    % wavenumber : list of wavenumbers
+    % anharmonicity : list of anharmonicity
+    % tauc1 : list of taus
+    % del1 : list of deltas
+    % wait : population delay
+    % cross_peak_weight : weight of cross peaks, e.g. [1,0,0.5] implies 
+    % (1,2) and (2,3) cross-peaks having weights of 1 & 0.5, respectively, and discard (1,3) cross-peak
+    % ------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    % public methods -
+    % use .spectr() for spectral calculations
+    % use .plot([wavenumber range1, wavenumber range2]) to set plot range
+    %%
+    properties
+
+        ccmfs = 2.9979 * 10^-5;% speed of light in cm/femtoseconds
+        s=0;
+        undersampling;
+        anharmonicity = 20;%%randomize
+
+        wt = 100;%%pop delay
+        tauc1=800;%correlation coeff%%
+        del1=0.003;% magnitude%%
+        lim;
+        tlist1;
+        wavenumber;
+        step;
+        intf;
+
+        om;% wavenum
+        ome;
+
+        outR;
+        outNR;
+
+        helpR;helpNR;
+        f1;f2;
+
+        dummyvar=false;
+
+        ome_pairs;
+        cross_peak_weight;
+    end
+
+    methods
+        function obj = synth2DIRMultT2(interferometer_scan,wavenumber,anharmonicity,tauc1,del1,wait,cross_peak_weight)
+            %%
+            % wavenumber=[1600,1550];
+            % anharmonicity=[20,30];
+            % tauc1=[200,800];
+            %%
+            obj.lim = interferometer_scan;% changing interferometer range changes lineshape %% randomize probably
+            obj.wavenumber=wavenumber;%central frequency
+
+            obj.undersampling= 2 *obj.s + 1;
+            obj.step = 1/(4 *mean(obj.wavenumber) * obj.ccmfs) * obj.undersampling;
+
+            tlist1 = 0:obj.step:obj.lim;
+            obj.tlist1=tlist1(1:end-1);% remove last elements to be consistent with mathematica
+
+            obj.intf.step=obj.step;
+            obj.intf.tlist=obj.tlist1;
+
+            obj.anharmonicity=anharmonicity;
+
+            obj.tauc1=tauc1;
+            obj.del1=del1;
+
+            obj.wt=wait;
+
+            obj.cross_peak_weight=cross_peak_weight;
+
+            obj.ome_pairs=obj.get_combos();
+
+        end
+    end
+
+    methods (Access=public)
+        function spectra(obj)
+            ccmfs=obj.ccmfs;
+            lim=obj.lim;
+            %wavenumber=obj.wavenumber;
+            wavenumber=mean(obj.wavenumber);
+            undersampling=obj.undersampling;
+            step=obj.step;
+            tlist1=obj.tlist1;
+            s=obj.s;
+            anharmonicity=obj.anharmonicity;
+
+            wt=obj.wt;
+
+            flist=(0:2/lim:1/step)/ccmfs/2;
+            flist=flist+wavenumber*(undersampling-1)/undersampling;
+            fnumber=length(flist);
+            pointnumber=length(tlist1);
+            nn=(pointnumber+1)/2;
+            takepoints=nn*(-1)^(s);
+            deltaf=(flist(2)-flist(1));
+            flist=flist+(-1)^s*deltaf;
+            frange=[flist(1),flist(end)];
+            trange=[tlist1(1),tlist1(end)];
+
+            obj.om = 2*pi* obj.wavenumber * ccmfs;
+            obj.ome = 2*pi*(2 *obj.wavenumber - anharmonicity) * ccmfs;
+
+            obj.sigNRtt(wt);
+            obj.sigRtt(wt);
+
+            outfNR=ifft2(obj.outNR);
+            outfR=ifft2(obj.outR);
+
+            samplepar=0;
+            nn=(length(tlist1)+1)/2;% take half of frequencies
+            takepar=round(nn*(-1)^(samplepar));
+
+            help=outfNR(2:end,2:end);
+            obj.helpNR=flip(flip(help(end-takepar+1:end,end-takepar+1:end),1),2).';
+
+            help=outfR(2:end,2:end);
+            obj.helpR=flip(help(end-takepar+1:end,1:takepar),1).';
+
+
+            obj.f1=linspace(frange(1),frange(2),size(obj.helpNR,2));
+            obj.f2=linspace(frange(1),frange(2),size(obj.helpNR,2));
+
+            obj.dummyvar=true;
+        end
+
+        function plot(obj,wave_range)
+            
+            
+            if ~obj.dummyvar;error('aborted : run spectra method first');end
+
+            helpR=obj.helpR;helpNR=obj.helpNR;
+            wavenumber=mean(obj.wavenumber);
+            f1=obj.f1;f2=obj.f2;
+            %%plots
+            figure;
+
+            subplot(1,3,1)
+            contourf(f1,f2,real(helpNR),20);
+            xlim([wavenumber-wave_range(1),wavenumber+wave_range(2)]);ylim([wavenumber-wave_range(1),wavenumber+wave_range(2)]);pbaspect([1,1,1]);title('NR');
+            xlabel('\omega1[cm^{-1}]');ylabel('\omega3[cm^{-1}]');
+
+            subplot(1,3,2)
+            contourf(f1,f2,real(helpR),20);
+            xlim([wavenumber-wave_range(1),wavenumber+wave_range(2)]);ylim([wavenumber-wave_range(1),wavenumber+wave_range(2)]);pbaspect([1,1,1]);title('R');
+            xlabel('\omega1[cm^{-1}]');ylabel('\omega3[cm^{-1}]');
+
+            subplot(1,3,3)
+            contourf(f1,f2,real(helpR+helpNR),20);
+            xlim([wavenumber-wave_range(1),wavenumber+wave_range(2)]);ylim([wavenumber-wave_range(1),wavenumber+wave_range(2)]);pbaspect([1,1,1]);title('R+NR');
+            xlabel('\omega1[cm^{-1}]');ylabel('\omega3[cm^{-1}]');
+
+
+
+        end
+    end
+
+    methods (Access=private)
+
+        function sigNRtt(obj,wait)
+            
+            ome_pair=obj.ome_pairs;
+            ome_pair=ome_pair(obj.cross_peak_weight>0,:);
+            tlist=obj.tlist1;
+            sz=length(tlist);
+ 
+            out=zeros(sz,sz);
+            cross_peaks=zeros(sz,sz,size(ome_pair,1));
+
+            for i=1:sz
+                out(i,:)=-obj.R1(tlist(i),wait,tlist)+obj.REAnr(tlist(i),wait,tlist);%+obj.CrossPeaksNR(ome_pair,tlist(i),tlist);
+                for i_cross = 1:size(ome_pair,1)
+                    cross_peaks(i,:,i_cross)=cross_peaks(i,:,i_cross)+obj.CrossPeaksNR(ome_pair(i_cross,:),tlist(i),tlist);
+                end
+            end
+            out=out+obj.weighed_mean(cross_peaks);
+            out(1,:) = out(1,:) /2;
+            obj.outNR=out;
+
+        end
+
+        function sigRtt(obj,wait)
+
+            tlist=obj.tlist1;
+
+            ome_pair=obj.ome_pairs;
+            ome_pair=ome_pair(obj.cross_peak_weight>0,:);
+            %cross_peak_weight=obj.cross_peak_weight;
+
+            %R2= @(t1,t2,t3,om) exp(-1i*om* (t3-t1)).*exp(-g(t1)+g(t2)-g(t3)-g(t1+t2)-g(t2+t3)+g(t1+t2+t3));
+            %REAr=@(t1,t2,t3,om,ome) exp(1i*(om* t1-(ome-om)*t3)).*exp(-g(t1)+g(t2)-g(t3)-g(t1+t2)-g(t2+t3)+g(t1+t2+t3));
+
+            sz=length(tlist);
+            out=zeros(sz,sz);
+            cross_peaks=zeros(sz,sz,size(ome_pair,1));
+   
+            for i=1:sz
+                out(i,:)=-obj.R2(tlist(i),wait,tlist)+obj.REAr(tlist(i),wait,tlist);
+                for i_cross = 1:size(ome_pair,1)
+                    cross_peaks(i,:,i_cross)=cross_peaks(i,:,i_cross)+obj.CrossPeaksR(ome_pair(i_cross,:),tlist(i),tlist);
+                end
+                %out(i,:)=out(i,:)+cross_peaks;
+            end
+            
+            out=out+obj.weighed_mean(cross_peaks);
+            %out=out+squeeze(mean(cross_peaks,3));
+            out(1,:) = out(1,:) /2;
+
+            obj.outR=out;
+
+        end
+
+
+        function out=R2(obj,t1,t2,t3)
+
+            om=obj.om;ome=obj.ome;tauc1=obj.tauc1;del1=obj.del1;
+
+            gf=@(t,tauc1,del1) del1(1).^2*tauc1(1).^2* (exp(-t/ tauc1(1)) + t/tauc1(1) - 1)+...%slow
+                del1(2).^2*tauc1(2).^2* (exp(-t/ tauc1(2)) + t/tauc1(2) - 1);%fast
+
+            out=zeros(1,length(t3));
+
+            for i =1:length(om)
+                out= out+ exp(-1i*om(i)* (t3-t1)).*exp(-gf(t1,tauc1(i,:),del1(i))+gf(t2,tauc1(i,:),del1(i))-gf(t3,tauc1(i,:),del1(i))-...
+                    gf(t1+t2,tauc1(i,:),del1(i))-gf(t2+t3,tauc1(i,:),del1(i))+gf(t1+t2+t3,tauc1(i,:),del1(i)));
+            end
+
+        end
+
+        function out=REAr(obj,t1,t2,t3)
+
+            om=obj.om;ome=obj.ome;tauc1=obj.tauc1;del1=obj.del1;
+
+            gf=@(t,tauc1,del1) del1(1).^2*tauc1(1).^2* (exp(-t/ tauc1(1)) + t/tauc1(1) - 1)+...%slow
+                del1(2).^2*tauc1(2).^2* (exp(-t/ tauc1(2)) + t/tauc1(2) - 1);%fast
+
+            out=zeros(1,length(t3));
+
+            for i =1:length(om)
+                out= out+ exp(1i*(om(i)* t1-(ome(i)-om(i))*t3)).*exp(-gf(t1,tauc1(i,:),del1(i))+gf(t2,tauc1(i,:),del1(i))-gf(t3,tauc1(i,),del1(i))-...
+                    gf(t1+t2,tauc1(i),del1(i))-gf(t2+t3,tauc1(i),del1(i))+gf(t1+t2+t3,tauc1(i),del1(i)));
+            end
+
+        end
+
+        function out=R1(obj,t1,t2,t3)
+            om=obj.om;ome=obj.ome;tauc1=obj.tauc1;del1=obj.del1;
+
+            gf=@(t,tauc1,del1) del1(1).^2*tauc1(1).^2* (exp(-t/ tauc1(1)) + t/tauc1(1) - 1)+...%slow
+                del1(2).^2*tauc1(2).^2* (exp(-t/ tauc1(2)) + t/tauc1(2) - 1);%fast
+
+            out=zeros(1,length(t3));
+
+            for i =1:length(om)
+                out= out+ exp(1i* om(i) *(t1+t3)).* exp(-gf(t1,tauc1(i),del1(i))-gf(t2,tauc1(i),del1(i))-gf(t3,tauc1(i),del1(i))+...
+                    gf(t1+t2,tauc1(i),del1(i))+gf(t2+t3,tauc1(i),del1(i))-gf(t1+t2+t3,tauc1(i),del1(i)));
+            end
+
+        end
+
+        function out=REAnr(obj,t1,t2,t3)
+            om=obj.om;ome=obj.ome;tauc1=obj.tauc1;del1=obj.del1;
+
+            gf=@(t,tauc1,del1) del1(1).^2*tauc1(1).^2* (exp(-t/ tauc1(1)) + t/tauc1(1) - 1)+...%slow
+                del1(2).^2*tauc1(2).^2* (exp(-t/ tauc1(2)) + t/tauc1(2) - 1);%fast
+
+            out=zeros(1,length(t3));
+
+            for i =1:length(om)
+                out= out+ exp(1i*(om(i)* t1+(ome(i)-om(i))*t3)).*exp(-gf(t1,tauc1(i),del1(i))-gf(t2,tauc1(i),del1(i))-gf(t3,tauc1(i),del1(i))+...
+                    gf(t1+t2,tauc1(i),del1(i))+gf(t2+t3,tauc1(i),del1(i))-gf(t1+t2+t3,tauc1(i),del1(i)));
+            end
+
+        end
+
+        function out=CrossPeaksR(obj,ome_pair,t1,t3)
+
+            om=obj.om(ome_pair);ome=obj.ome(ome_pair);tauc1=obj.tauc1(ome_pair);del1=obj.del1(ome_pair);
+
+
+            gf=@(t,tauc1,del1) del1(1).^2*tauc1(1).^2* (exp(-t/ tauc1(1)) + t/tauc1(1) - 1)+...%slow
+                del1(2).^2*tauc1(2).^2* (exp(-t/ tauc1(2)) + t/tauc1(2) - 1);%fast
+
+            out = (-exp(-1i*(om(2)*t3-om(1)*t1))+exp(-1i*((ome(2)-om(2))*t3-om(1)*t1))).*exp(-gf(t1,tauc1(1),del1(1))-gf(t3,tauc1(1),del1(1)))+...
+                (-exp(-1i*(om(1)*t3-om(2)*t1))+exp(-1i*((ome(1)-om(1))*t3-om(2)*t1))).*exp(-gf(t1,tauc1(1),del1(1))-gf(t3,tauc1(1),del1(1)));
+
+            %exp(-1i*((ome(i)-om(i))*t3-om(i)* t1))
+            
+        end
+
+        function out=CrossPeaksNR(obj,ome_pair,t1,t3)
+
+            om=obj.om(ome_pair);ome=obj.ome(ome_pair);tauc1=obj.tauc1(ome_pair);del1=obj.del1(ome_pair);
+
+
+            gf=@(t,tauc1,del1) del1(1).^2*tauc1(1).^2* (exp(-t/ tauc1(1)) + t/tauc1(1) - 1)+...%slow
+                del1(2).^2*tauc1(2).^2* (exp(-t/ tauc1(2)) + t/tauc1(2) - 1);%fast
+
+            out = (-exp(1i* (om(1) *t1+om(2) *t3))+exp(1i*(om(1)* t1+(ome(2)-om(2))*t3))).*exp(-gf(t1,tauc1(1),del1(1))-gf(t3,tauc1(1),del1(1)))+...
+                (-exp(1i* (om(2) *t1+om(1) *t3))+exp(1i*(om(2)* t1+(ome(1)-om(1))*t3))).*exp(-gf(t1,tauc1(1),del1(1))-gf(t3,tauc1(1),del1(1)));
+            
+        end
+
+        function out_mean=weighed_mean(obj,arr)
+            wts=obj.cross_peak_weight;
+            wts=wts(wts>0);
+            for k =1 : size(arr,3)
+                arr(:,:,k)=wts(k)*arr(:,:,k);
+            end
+    
+            out_mean=squeeze(sum(arr,3)/sum(wts>0));
+        end
+
+        function combos=get_combos(obj)
+            combos=[];
+            for i = 1: length(obj.wavenumber)-1
+                for j = i+1 : length(obj.wavenumber)
+                    combos=[combos;[i,j]];
+                end
+            end
+
+        end
+
+    end
+
+
+
+
+
+
+
+end
