@@ -1,3 +1,5 @@
+%%%
+% calculate 2DIR for pop -delays
 i_intf = 5000;
 i_cf1 = 1640;i_cf2= 1665;
 i_anh1=10;i_anh2=20;
